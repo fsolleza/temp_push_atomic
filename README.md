@@ -6,31 +6,36 @@ cargo run release 10000000 # write 10 million data items
 
 NONE
 data 10000000
-106.713867ms # time it took to write specified number of items
-1220700000   # print sum to prevent compiler optimization
+98.835872ms
+1383600000
 
-MUTEX         # mutex in the hot write path
+MUTEX
 data 10000000
-954.218946ms
-1290500000
+831.190241ms
+1290000000
 
-SEQCST        # seqcst atomic in the hot write path
+SEQCST
 data 10000000
-274.111292ms
-1227500000
+273.738834ms
+1246500000
 
-RELAXED       # relaxed atomic + a release mem fence in the hot write path
+RELAXED
 data 10000000
-296.073475ms
-1193700000
+296.055143ms
+1400100000
 
-SEQCST WRITE+READ # seqcst atomic with specified readers (measured with 4)
+MUTEX WRITE+READ
 data 10000000
-3.724079091s
-1212200000
+24.324892919s
+1199300000
 
-FENCED WRITE+READ # relaxed atomic + a release memfence in the hot write path, acquire memfence in the read path
+SEQCST WRITE+READ
 data 10000000
-4.592099113s
-1248500000
+4.482669336s
+1345400000
+
+FENCED WRITE+READ
+data 10000000
+4.608179427s
+1212700000
 ```
