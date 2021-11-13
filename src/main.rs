@@ -9,15 +9,11 @@ pub struct Data {
     data: Box<[u8]>,
     idx: usize,
     atomic_idx: AtomicUsize,
-    mutex_data: Mutex<(Box<[u8]>, usize)>,
+    mutex_idx: Mutex<usize>,
 }
 
 impl Data {
     fn new(l: usize) -> Self {
-        let mut data = Vec::new();
-        data.resize(l, 0u8);
-        let mutex_data = Mutex::new((data.into_boxed_slice(), 0));
-
         let mut data = Vec::new();
         data.resize(l, 0u8);
         println!("data {}", data.len());
@@ -25,7 +21,7 @@ impl Data {
             data: data.into_boxed_slice(),
             idx: 0,
             atomic_idx: AtomicUsize::new(0),
-            mutex_data,
+            mutex_idx: Mutex::new(0),
         }
     }
 
@@ -45,13 +41,15 @@ impl Data {
     fn mutex_push(&mut self, data: &[u8]) {
         let now = time::Instant::now();
         loop {
-            let mut guard = self.mutex_data.lock().unwrap();
-            let idx = guard.1;
-            guard.0[idx] = data[idx % data.len()];
-            guard.1 += 1;
-            if guard.1 == self.data.len() {
+            let idx = self.idx;
+            if idx == self.data.len() {
                 break;
             }
+            self.data[idx] = data[idx % data.len()];
+            let mut guard = self.mutex_idx.lock().unwrap();
+            *guard += 1;
+            drop(guard);
+            self.idx += 1;
         }
         let stop = time::Instant::now();
         println!("{:?}", stop - now);
@@ -93,15 +91,6 @@ impl Data {
         }
         d
     }
-
-    fn mutex_sum(&self) -> usize {
-        let mut d: usize = 0;
-        let guard = self.mutex_data.lock().unwrap();
-        for i in guard.0.iter() {
-            d += *i as usize;
-        }
-        d
-    }
 }
 
 fn run_fenced_reader(data: &Data) {
@@ -109,8 +98,7 @@ fn run_fenced_reader(data: &Data) {
     loop {
         let idx = data.atomic_idx.load(Ordering::Relaxed);
         fence(Ordering::Acquire);
-        if idx == 0 {
-        } else {
+        if idx > 0 {
             assert!(data.data[idx-1] > 0);
         }
         if idx == l {
@@ -140,13 +128,11 @@ fn run_fenced_push_read(len: usize, readers: usize) {
     println!("{}", d);
 }
 
-
 fn run_seqcst_reader(data: &Data) {
     let l = data.data.len();
     loop {
         let idx = data.atomic_idx.load(Ordering::SeqCst);
-        if idx == 0 {
-        } else {
+        if idx > 0 {
             assert!(data.data[idx-1] > 0);
         }
         if idx == l {
@@ -188,6 +174,40 @@ fn run_seqcst_push_read(len: usize, readers: usize) {
     println!("{}", d);
 }
 
+fn run_mutex_reader(data: &Data) {
+    let l = data.data.len();
+    loop {
+        let idx = {*data.mutex_idx.lock().unwrap()};
+        if idx > 0 {
+            assert!(data.data[idx-1] > 0);
+        }
+        if idx == l {
+            break;
+        }
+    }
+}
+
+fn run_mutex_push_read(len: usize, readers: usize) {
+    let arr = new_data();
+    let data = Arc::new(Data::new(len));
+    let data_ref: &mut Data = unsafe { (Arc::as_ptr(&data) as *mut Data).as_mut().unwrap() };
+    let mut handles = Vec::new();
+    for _ in 0..readers {
+        let data_clone = data.clone();
+        handles.push(thread::spawn(|| {
+            let data = data_clone;
+            run_mutex_reader(&*data)
+        }));
+    }
+    data_ref.mutex_push(&arr[..]);
+
+    for h in handles {
+        h.join().unwrap();
+    }
+    let d = data.sum();
+    println!("{}", d);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let len: usize = args[2].parse().unwrap();
@@ -203,7 +223,7 @@ fn main() {
     let arr = new_data();
     let mut data = Data::new(len);
     data.mutex_push(&arr[..]);
-    let d = data.mutex_sum();
+    let d = data.sum();
     println!("{}", d);
 
     println!("\nSEQCST");
@@ -220,6 +240,8 @@ fn main() {
     let d = data.sum();
     println!("{}", d);
 
+    println!("\nMUTEX WRITE+READ");
+    run_mutex_push_read(len, 4);
     println!("\nSEQCST WRITE+READ");
     run_seqcst_push_read(len, 4);
     println!("\nFENCED WRITE+READ");
