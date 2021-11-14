@@ -1,5 +1,5 @@
 use std::thread;
-use std::sync::{Mutex, Arc, atomic::{AtomicUsize, Ordering, fence}};
+use std::sync::{Mutex, Arc, atomic::{AtomicUsize, AtomicBool, Ordering, fence}};
 use std::time;
 use std::env;
 use rand::thread_rng;
@@ -10,18 +10,23 @@ pub struct Data {
     idx: usize,
     atomic_idx: AtomicUsize,
     mutex_idx: Mutex<usize>,
+    atomic_bool: Box<[AtomicBool]>,
 }
 
 impl Data {
     fn new(l: usize) -> Self {
         let mut data = Vec::new();
         data.resize(l, 0u8);
+
+        let mut atomic_bool = Vec::new();
+        atomic_bool.resize_with(l, || { AtomicBool::new(false) });
         println!("data {}", data.len());
         Data {
             data: data.into_boxed_slice(),
             idx: 0,
             atomic_idx: AtomicUsize::new(0),
             mutex_idx: Mutex::new(0),
+            atomic_bool: atomic_bool.into_boxed_slice(),
         }
     }
 
@@ -84,6 +89,21 @@ impl Data {
         println!("{:?}", stop - now);
     }
 
+    fn atomic_bool_push(&mut self, data: &[u8]) {
+        let now = time::Instant::now();
+        loop {
+            self.data[self.idx] = data[self.idx % data.len()];
+            self.atomic_bool[self.idx].store(true, Ordering::SeqCst);
+            self.idx += 1;
+            if self.idx == self.data.len() {
+                break;
+            }
+        }
+        let stop = time::Instant::now();
+        println!("{:?}", stop - now);
+    }
+
+
     fn sum(&self) -> usize {
         let mut d: usize = 0;
         for i in self.data.iter() {
@@ -91,6 +111,41 @@ impl Data {
         }
         d
     }
+}
+
+fn run_bool_reader(data: &Data) {
+    let l = data.data.len();
+    let mut idx = 0;
+    loop {
+        if data.atomic_bool[idx].load(Ordering::SeqCst) {
+            assert!(data.data[idx] > 0);
+        }
+        idx += 1;
+        if idx == l {
+            break;
+        }
+    }
+}
+
+fn run_bool_push_read(len: usize, readers: usize) {
+    let arr = new_data();
+    let data = Arc::new(Data::new(len));
+    let data_ref: &mut Data = unsafe { (Arc::as_ptr(&data) as *mut Data).as_mut().unwrap() };
+    let mut handles = Vec::new();
+    for _ in 0..readers {
+        let data_clone = data.clone();
+        handles.push(thread::spawn(|| {
+            let data = data_clone;
+            run_bool_reader(&*data)
+        }));
+    }
+    data_ref.atomic_bool_push(&arr[..]);
+
+    for h in handles {
+        h.join().unwrap();
+    }
+    let d = data.sum();
+    println!("{}", d);
 }
 
 fn run_fenced_reader(data: &Data) {
@@ -209,8 +264,8 @@ fn run_mutex_push_read(len: usize, readers: usize) {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let len: usize = args[2].parse().unwrap();
+    //let args: Vec<String> = env::args().collect();
+    let len: usize = 10_000_000;
 
     println!("\nNONE");
     let arr = new_data();
@@ -240,10 +295,19 @@ fn main() {
     let d = data.sum();
     println!("{}", d);
 
+    println!("\nATOMIC BOOL ARRAY");
+    let arr = new_data();
+    let mut data = Data::new(len);
+    data.atomic_bool_push(&arr[..]);
+    let d = data.sum();
+    println!("{}", d);
+
     println!("\nMUTEX WRITE+READ");
     run_mutex_push_read(len, 4);
     println!("\nSEQCST WRITE+READ");
     run_seqcst_push_read(len, 4);
     println!("\nFENCED WRITE+READ");
     run_fenced_push_read(len, 4);
+    println!("\nATOMIC BOOL WRITE+READ");
+    run_bool_push_read(len, 4);
 }
