@@ -1,9 +1,12 @@
-use std::thread;
-use std::sync::{Mutex, Arc, atomic::{AtomicUsize, AtomicBool, Ordering, fence}};
-use std::time;
-use std::env;
 use rand::thread_rng;
 use rand::Rng;
+use std::panic;
+use std::sync::{
+    atomic::{fence, AtomicBool, AtomicUsize, Ordering},
+    Arc, Mutex,
+};
+use std::thread;
+use std::time;
 
 pub struct Data {
     data: Box<[u8]>,
@@ -19,7 +22,7 @@ impl Data {
         data.resize(l, 0u8);
 
         let mut atomic_bool = Vec::new();
-        atomic_bool.resize_with(l, || { AtomicBool::new(false) });
+        atomic_bool.resize_with(l, || AtomicBool::new(false));
         println!("data {}", data.len());
         Data {
             data: data.into_boxed_slice(),
@@ -74,6 +77,25 @@ impl Data {
         println!("{:?}", stop - now);
     }
 
+    fn optional_atomic_push(&mut self, data: &[u8], sync_freq: usize) {
+        let now = time::Instant::now();
+        loop {
+            let idx = self.idx;
+            if idx == self.data.len() {
+                break;
+            }
+            self.data[idx] = data[idx % data.len()];
+            fence(Ordering::Release);
+            self.idx += 1;
+            if idx % sync_freq == 0 {
+                self.atomic_idx.store(self.idx, Ordering::SeqCst);
+            }
+        }
+        self.atomic_idx.store(self.idx, Ordering::SeqCst);
+        let stop = time::Instant::now();
+        println!("{:?}", stop - now);
+    }
+
     fn atomic_fenced_push(&mut self, data: &[u8]) {
         let now = time::Instant::now();
         loop {
@@ -102,7 +124,6 @@ impl Data {
         let stop = time::Instant::now();
         println!("{:?}", stop - now);
     }
-
 
     fn sum(&self) -> usize {
         let mut d: usize = 0;
@@ -154,7 +175,7 @@ fn run_fenced_reader(data: &Data) {
         let idx = data.atomic_idx.load(Ordering::Relaxed);
         fence(Ordering::Acquire);
         if idx > 0 {
-            assert!(data.data[idx-1] > 0);
+            assert!(data.data[idx - 1] > 0);
         }
         if idx == l {
             break;
@@ -188,10 +209,22 @@ fn run_seqcst_reader(data: &Data) {
     loop {
         let idx = data.atomic_idx.load(Ordering::SeqCst);
         if idx > 0 {
-            assert!(data.data[idx-1] > 0);
+            assert!(data.data[idx - 1] > 0);
         }
         if idx == l {
             break;
+        }
+    }
+}
+
+fn run_unsynchronized_reader(data: &Data) -> Result<(), &'static str> {
+    let l = data.data.len();
+    loop {
+        if data.idx > 0 && data.data[data.idx - 1] == 0 {
+            return Err("Reader runs faster than writer!");
+        }
+        if data.idx == l {
+            return Ok(());
         }
     }
 }
@@ -229,12 +262,38 @@ fn run_seqcst_push_read(len: usize, readers: usize) {
     println!("{}", d);
 }
 
+fn run_optional_sync_push_read(len: usize, readers: usize, sync_freq: usize) {
+    let arr = new_data();
+    let data = Arc::new(Data::new(len));
+    let data_ref: &mut Data = unsafe { (Arc::as_ptr(&data) as *mut Data).as_mut().unwrap() };
+    let mut handles = Vec::new();
+    for _ in 0..readers {
+        let data_clone = data.clone();
+        handles.push(thread::spawn(|| {
+            let data = data_clone;
+            run_unsynchronized_reader(&*data)
+        }));
+    }
+    data_ref.optional_atomic_push(&arr[..], sync_freq);
+
+    for h in handles {
+        match h.join() {
+            Ok(_) => (),
+            Err(e) => {
+                panic!("join error: {:?}", e);
+            }
+        }
+    }
+    let d = data.sum();
+    println!("{}", d);
+}
+
 fn run_mutex_reader(data: &Data) {
     let l = data.data.len();
     loop {
-        let idx = {*data.mutex_idx.lock().unwrap()};
+        let idx = { *data.mutex_idx.lock().unwrap() };
         if idx > 0 {
-            assert!(data.data[idx-1] > 0);
+            assert!(data.data[idx - 1] > 0);
         }
         if idx == l {
             break;
@@ -304,10 +363,16 @@ fn main() {
 
     println!("\nMUTEX WRITE+READ");
     run_mutex_push_read(len, 4);
+
     println!("\nSEQCST WRITE+READ");
     run_seqcst_push_read(len, 4);
+
+    println!("\nOPTIONAL SYNC WRITE+READ");
+    run_optional_sync_push_read(len, 4, 5);
+
     println!("\nFENCED WRITE+READ");
     run_fenced_push_read(len, 4);
+
     println!("\nATOMIC BOOL WRITE+READ");
     run_bool_push_read(len, 4);
 }
