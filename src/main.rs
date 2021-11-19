@@ -271,7 +271,7 @@ fn run_optional_sync_push_read(len: usize, readers: usize, sync_freq: usize) {
         let data_clone = data.clone();
         handles.push(thread::spawn(|| {
             let data = data_clone;
-            run_unsynchronized_reader(&*data)
+            run_seqcst_reader(&*data)
         }));
     }
     data_ref.optional_atomic_push(&arr[..], sync_freq);
