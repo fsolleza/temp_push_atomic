@@ -326,53 +326,53 @@ fn main() {
     //let args: Vec<String> = env::args().collect();
     let len: usize = 10_000_000;
 
-    // println!("\nNONE");
-    // let arr = new_data();
-    // let mut data = Data::new(len);
-    // data.push(&arr[..]);
-    // let d = data.sum();
-    // println!("{}", d);
+    println!("\nNONE");
+    let arr = new_data();
+    let mut data = Data::new(len);
+    data.push(&arr[..]);
+    let d = data.sum();
+    println!("{}", d);
 
-    // println!("\nMUTEX");
-    // let arr = new_data();
-    // let mut data = Data::new(len);
-    // data.mutex_push(&arr[..]);
-    // let d = data.sum();
-    // println!("{}", d);
+    println!("\nMUTEX");
+    let arr = new_data();
+    let mut data = Data::new(len);
+    data.mutex_push(&arr[..]);
+    let d = data.sum();
+    println!("{}", d);
 
-    // println!("\nSEQCST");
-    // let arr = new_data();
-    // let mut data = Data::new(len);
-    // data.atomic_seqcst_push(&arr[..]);
-    // let d = data.sum();
-    // println!("{}", d);
+    println!("\nSEQCST");
+    let arr = new_data();
+    let mut data = Data::new(len);
+    data.atomic_seqcst_push(&arr[..]);
+    let d = data.sum();
+    println!("{}", d);
 
-    // println!("\nRELAXED");
-    // let arr = new_data();
-    // let mut data = Data::new(len);
-    // data.atomic_fenced_push(&arr[..]);
-    // let d = data.sum();
-    // println!("{}", d);
+    println!("\nRELAXED");
+    let arr = new_data();
+    let mut data = Data::new(len);
+    data.atomic_fenced_push(&arr[..]);
+    let d = data.sum();
+    println!("{}", d);
 
-    // println!("\nATOMIC BOOL ARRAY");
-    // let arr = new_data();
-    // let mut data = Data::new(len);
-    // data.atomic_bool_push(&arr[..]);
-    // let d = data.sum();
-    // println!("{}", d);
+    println!("\nATOMIC BOOL ARRAY");
+    let arr = new_data();
+    let mut data = Data::new(len);
+    data.atomic_bool_push(&arr[..]);
+    let d = data.sum();
+    println!("{}", d);
 
-    // println!("\nMUTEX WRITE+READ");
-    // run_mutex_push_read(len, 4);
+    println!("\nMUTEX WRITE+READ");
+    run_mutex_push_read(len, 4);
 
-    // println!("\nSEQCST WRITE+READ");
-    // run_seqcst_push_read(len, 4);
+    println!("\nSEQCST WRITE+READ");
+    run_seqcst_push_read(len, 4);
 
     println!("\nOPTIONAL SYNC WRITE+READ");
     run_optional_sync_push_read(len, 4, 5);
 
-    // println!("\nFENCED WRITE+READ");
-    // run_fenced_push_read(len, 4);
+    println!("\nFENCED WRITE+READ");
+    run_fenced_push_read(len, 4);
 
-    // println!("\nATOMIC BOOL WRITE+READ");
-    // run_bool_push_read(len, 4);
+    println!("\nATOMIC BOOL WRITE+READ");
+    run_bool_push_read(len, 4);
 }
