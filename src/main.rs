@@ -367,8 +367,14 @@ fn main() {
     println!("\nSEQCST WRITE+READ");
     run_seqcst_push_read(len, 4);
 
-    println!("\nOPTIONAL SYNC WRITE+READ");
+    println!("\n1 in 2 SYNC WRITES+READ");
+    run_optional_sync_push_read(len, 4, 2);
+
+    println!("\n1 in 5 SYNC WRITES+READ");
     run_optional_sync_push_read(len, 4, 5);
+
+    println!("\n1 in 50 SYNC WRITES+READ");
+    run_optional_sync_push_read(len, 4, 50);
 
     println!("\nFENCED WRITE+READ");
     run_fenced_push_read(len, 4);
