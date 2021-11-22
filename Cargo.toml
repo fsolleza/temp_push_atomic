@@ -7,3 +7,12 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8.4"
+
+[[bin]]
+name = "exp1"
+path = "src/exp1.rs"
+
+[[bin]]
+name = "exp2"
+path = "src/exp2.rs"
+
