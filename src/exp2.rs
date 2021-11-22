@@ -1,10 +1,12 @@
 use rand::Rng;
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, AtomicU64, Ordering::SeqCst},
+    atomic::{AtomicBool, AtomicPtr, AtomicUsize, AtomicIsize, AtomicU64, Ordering::SeqCst},
     Arc, RwLock,
 };
 use std::thread;
 use std::time;
+use std::mem;
+use rtrb::*;
 
 pub struct Base {
     data: [u64; 256],
@@ -81,17 +83,20 @@ impl Base {
 }
 
 /// Sets up a read server that updates a pointer each period.
-fn read_server(active: Arc<AtomicBool>, ptr: Arc<RwLock<Arc<Read>>>, data: &Base) {
+fn read_server(active: Arc<AtomicBool>, ptr: Arc<AtomicPtr<Read>>, data: &Base) {
     let mut update_cnt = 0;
     let mut v = 0;
+    let mut sum = 0;
     while active.load(SeqCst) {
         match data.read_server() {
             Ok(x) => {
                 // Take a write lock and update the new pointer with most recent read data
-                //println!("HERE");
-                *ptr.write().unwrap() = Arc::new(x);
-                //update_cnt += 1;
-                //v = ptr.read().unwrap().version;
+                let r = Box::into_raw(Box::new(x));
+                ptr.store(r, SeqCst);
+                let r = unsafe { r.as_ref().unwrap() };
+                update_cnt += 1;
+                v = r.version;
+                sum += r.data[..r.len].iter().sum::<u64>() % 1024;
             }
             Err(x) => {
                 println!("{}", x);
@@ -99,26 +104,30 @@ fn read_server(active: Arc<AtomicBool>, ptr: Arc<RwLock<Arc<Read>>>, data: &Base
         }
         thread::sleep(time::Duration::from_millis(MILLIS_INTERVAL));
     }
-    //println!("update_cnt {} last version {}", update_cnt, v);
+    //println!("update_cnt {} ", update_cnt);
+    //println!("update_cnt {} last version {} sum {}", update_cnt, v, sum);
 }
 
 /// Run a reader that repeatedly reads the data written by the read_server. Takes a readlock and
 /// clones that data
 fn read_server_loop(
     active: Arc<AtomicBool>,
-    ptr: Arc<RwLock<Arc<Read>>>,
+    ptr: Arc<AtomicPtr<Read>>,
     read_count: Arc<AtomicU64>,
     sink: Arc<AtomicU64>,
     data: &Base,
 ) {
     let mut sum = 0;
     let mut ctr = 0;
+    let mut v = 0;
     while active.load(SeqCst) {
-        let read = ptr.read().unwrap().clone();
+        let read = unsafe { ptr.load(SeqCst).as_ref().unwrap() };
         sum += read.data[..read.len].iter().sum::<u64>();
+        v = read.version;
         ctr += 1;
     }
     read_count.fetch_add(ctr, SeqCst);
+    //println!("{:?} {:?} {:?}", sum, ctr, v);
     sink.fetch_add(sum % 1024, SeqCst);
 }
 
@@ -139,7 +148,6 @@ fn read_loop(active: Arc<AtomicBool>, read_count: Arc<AtomicU64>, sink: Arc<Atom
     read_count.fetch_add(ctr, SeqCst);
     sink.fetch_add(sum % 1024, SeqCst);
 }
-
 
 /// A write loop that forces an atomic boolean every time a push happens
 fn atomic_write_loop(active: Arc<AtomicBool>, data: &mut Base, to_write: &[u64]) -> time::Duration {
@@ -205,7 +213,7 @@ fn runner_server(readers: usize, read_count: Arc<AtomicU64>, sink: Arc<AtomicU64
     rand::thread_rng().fill(&mut to_write[..]);
     let data = Arc::new(Base::new());
     let active = Arc::new(AtomicBool::new(true));
-    let read_ptr = Arc::new(RwLock::new(Arc::new(data.read().unwrap())));
+    let read_ptr = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(data.read().unwrap()))));
     let mut handles = Vec::new();
 
     // Run server
@@ -261,7 +269,7 @@ fn median(v: &[f64]) -> f64 {
 }
 
 const ITERS: usize = 30;                // number of iterations of the experiment to run
-const NTHREADS: usize = 1;              // number of concurrent reader threads
+const NTHREADS: usize = 36;              // number of concurrent reader threads
 const MILLIS_INTERVAL: u64 = 10;        // interval to update reader server in millis
 const NPUSHES: usize = 10_000_000;      // how many pushes each experiment should run for
 

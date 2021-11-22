@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "cache-padded"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
+
+[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -30,6 +36,7 @@ name = "memfences"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "rtrb",
 ]
 
 [[package]]
@@ -76,6 +83,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d51e9f596de227fda2ea6c84607f5558e196eeaf43c986b724ba4fb8fdf497e7"
 dependencies = [
  "rand_core",
+]
+
+[[package]]
+name = "rtrb"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d911d82e9745a598dd118e6bda2165531e316cf8eae65240776637ae8168458"
+dependencies = [
+ "cache-padded",
 ]
 
 [[package]]
