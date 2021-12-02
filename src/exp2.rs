@@ -1,12 +1,12 @@
 use rand::Rng;
 use rtrb::*;
-use std::mem;
+use std::{env, mem};
 
 use std::sync::{
     atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering::SeqCst},
     Arc, RwLock,
 };
-use std::thread;
+use std::thread::{self};
 use std::time;
 
 pub struct Base {
@@ -92,7 +92,12 @@ impl Base {
 }
 
 /// Sets up a read server that updates a pointer each period.
-fn read_server(active: Arc<AtomicBool>, ptr: Arc<AtomicPtr<Read>>, data: &Base) {
+fn read_server(
+    active: Arc<AtomicBool>,
+    ptr: Arc<AtomicPtr<Read>>,
+    data: &Base,
+    sleep_dur_micros: u64,
+) {
     let mut update_cnt = 0;
     let mut v = 0;
     let mut sum = 0;
@@ -111,7 +116,7 @@ fn read_server(active: Arc<AtomicBool>, ptr: Arc<AtomicPtr<Read>>, data: &Base) 
                 println!("{}", x);
             }
         }
-        thread::sleep(time::Duration::from_millis(NANOS_INTERVAL));
+        thread::sleep(time::Duration::from_micros(sleep_dur_micros));
     }
     //println!("update_cnt {} ", update_cnt);
     //println!("update_cnt {} last version {} sum {}", update_cnt, v, sum);
@@ -226,6 +231,7 @@ fn runner_server(
     readers: usize,
     read_count: Arc<AtomicU64>,
     sink: Arc<AtomicU64>,
+    sleep_dur_micros: u64,
 ) -> time::Duration {
     let mut to_write = [0u64; 1234];
     rand::thread_rng().fill(&mut to_write[..]);
@@ -241,7 +247,7 @@ fn runner_server(
     let ac = active.clone();
     let pc = read_ptr.clone();
     handles.push(thread::spawn(move || {
-        read_server(ac, pc, &dc);
+        read_server(ac, pc, &dc, sleep_dur_micros);
     }));
 
     // Run each reader
@@ -290,7 +296,7 @@ fn median(v: &[f64]) -> f64 {
 
 const ITERS: usize = 30; // number of iterations of the experiment to run
 const NTHREADS: usize = 36; // number of concurrent reader threads
-const NANOS_INTERVAL: u64 = 500; // interval to update reader server in nanos
+                            // const NANOS_INTERVAL: u64 = 500; // interval to update reader server in nanos
 const NPUSHES: usize = 30_000_000; // how many pushes each experiment should run for
 
 fn bench_no_sync() {
@@ -307,12 +313,12 @@ fn bench_no_sync() {
     println!("sink: {:?}", sink);
 }
 
-fn bench_read_server() {
+fn bench_read_server(sleep_dur_micros: u64) {
     let sink = Arc::new(AtomicU64::new(0));
     let read_count = Arc::new(AtomicU64::new(0));
     let mut v = Vec::new();
     for i in 0..ITERS {
-        let d = runner_server(NTHREADS, read_count.clone(), sink.clone());
+        let d = runner_server(NTHREADS, read_count.clone(), sink.clone(), sleep_dur_micros);
         v.push(d.as_secs_f64());
     }
     println!("average: {}", mean(v.as_slice()));
@@ -322,6 +328,9 @@ fn bench_read_server() {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let dur_micros = &args[1].parse::<u64>().unwrap();
+
     // bench_no_sync();
-    bench_read_server();
+    bench_read_server(*dur_micros);
 }
