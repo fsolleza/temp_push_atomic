@@ -1,12 +1,13 @@
 use rand::Rng;
+use rtrb::*;
+use std::mem;
+
 use std::sync::{
-    atomic::{AtomicBool, AtomicPtr, AtomicUsize, AtomicIsize, AtomicU64, Ordering::SeqCst},
+    atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering::SeqCst},
     Arc, RwLock,
 };
 use std::thread;
 use std::time;
-use std::mem;
-use rtrb::*;
 
 pub struct Base {
     data: [u64; 256],
@@ -29,7 +30,7 @@ impl Base {
             len: 0,
             alen: AtomicUsize::new(0),
             aver: AtomicUsize::new(0),
-            ver: 0
+            ver: 0,
         }
     }
 
@@ -60,7 +61,11 @@ impl Base {
             let len = self.alen.load(SeqCst);
             data[..len].copy_from_slice(&self.data[..len]);
             if v == self.aver.load(SeqCst) {
-                let r = Read { data, len , version: v};
+                let r = Read {
+                    data,
+                    len,
+                    version: v,
+                };
                 return Ok(r);
             }
         }
@@ -74,7 +79,11 @@ impl Base {
             let len = self.len;
             data[..len].copy_from_slice(&self.data[..len]);
             if v == self.ver {
-                let r = Read { data, len , version: v};
+                let r = Read {
+                    data,
+                    len,
+                    version: v,
+                };
                 return Ok(r);
             }
         }
@@ -102,7 +111,7 @@ fn read_server(active: Arc<AtomicBool>, ptr: Arc<AtomicPtr<Read>>, data: &Base) 
                 println!("{}", x);
             }
         }
-        thread::sleep(time::Duration::from_millis(MILLIS_INTERVAL));
+        thread::sleep(time::Duration::from_millis(NANOS_INTERVAL));
     }
     //println!("update_cnt {} ", update_cnt);
     //println!("update_cnt {} last version {} sum {}", update_cnt, v, sum);
@@ -133,7 +142,12 @@ fn read_server_loop(
 
 /// Run a reader that repeatedly calls the read() function which uses no syncrhonization except for
 /// the version number (can't be avoided)
-fn read_loop(active: Arc<AtomicBool>, read_count: Arc<AtomicU64>, sink: Arc<AtomicU64>, data: &Base) {
+fn read_loop(
+    active: Arc<AtomicBool>,
+    read_count: Arc<AtomicU64>,
+    sink: Arc<AtomicU64>,
+    data: &Base,
+) {
     let mut sum = 0;
     let mut ctr = 0;
     while active.load(SeqCst) {
@@ -208,12 +222,18 @@ fn runner(readers: usize, read_count: Arc<AtomicU64>, sink: Arc<AtomicU64>) -> t
     dur
 }
 
-fn runner_server(readers: usize, read_count: Arc<AtomicU64>, sink: Arc<AtomicU64>) -> time::Duration {
+fn runner_server(
+    readers: usize,
+    read_count: Arc<AtomicU64>,
+    sink: Arc<AtomicU64>,
+) -> time::Duration {
     let mut to_write = [0u64; 1234];
     rand::thread_rng().fill(&mut to_write[..]);
     let data = Arc::new(Base::new());
     let active = Arc::new(AtomicBool::new(true));
-    let read_ptr = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(data.read().unwrap()))));
+    let read_ptr = Arc::new(AtomicPtr::new(Box::into_raw(Box::new(
+        data.read().unwrap(),
+    ))));
     let mut handles = Vec::new();
 
     // Run server
@@ -268,10 +288,10 @@ fn median(v: &[f64]) -> f64 {
     }
 }
 
-const ITERS: usize = 30;                // number of iterations of the experiment to run
-const NTHREADS: usize = 36;              // number of concurrent reader threads
-const MILLIS_INTERVAL: u64 = 10;        // interval to update reader server in millis
-const NPUSHES: usize = 10_000_000;      // how many pushes each experiment should run for
+const ITERS: usize = 30; // number of iterations of the experiment to run
+const NTHREADS: usize = 36; // number of concurrent reader threads
+const NANOS_INTERVAL: u64 = 500; // interval to update reader server in nanos
+const NPUSHES: usize = 30_000_000; // how many pushes each experiment should run for
 
 fn bench_no_sync() {
     let sink = Arc::new(AtomicU64::new(0));
@@ -291,7 +311,7 @@ fn bench_read_server() {
     let sink = Arc::new(AtomicU64::new(0));
     let read_count = Arc::new(AtomicU64::new(0));
     let mut v = Vec::new();
-    for i in 0..ITERS{
+    for i in 0..ITERS {
         let d = runner_server(NTHREADS, read_count.clone(), sink.clone());
         v.push(d.as_secs_f64());
     }
@@ -302,6 +322,6 @@ fn bench_read_server() {
 }
 
 fn main() {
-    bench_no_sync();
+    // bench_no_sync();
     bench_read_server();
 }
