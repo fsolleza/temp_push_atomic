@@ -169,13 +169,22 @@ fn read_loop(
 }
 
 /// A write loop that forces an atomic boolean every time a push happens
-fn atomic_write_loop(active: Arc<AtomicBool>, data: &mut Base, to_write: &[u64]) -> time::Duration {
+fn atomic_write_loop(
+    active: Arc<AtomicBool>,
+    data: &mut Base,
+    to_write: &[u64],
+    push_sync_freq: usize,
+) -> time::Duration {
     let mut counter = 0;
     let l = to_write.len();
     let now = time::Instant::now();
     for i in 0..NPUSHES {
         // This function increments an atomic counter
-        data.atomic_push(to_write[i % l]);
+        if i % push_sync_freq == 0 {
+            data.atomic_push(to_write[i % l]);
+        } else {
+            data.push(to_write[i % l]);
+        }
     }
     let elapsed = now.elapsed();
     active.store(false, SeqCst);
@@ -232,6 +241,7 @@ fn runner_server(
     read_count: Arc<AtomicU64>,
     sink: Arc<AtomicU64>,
     sleep_dur_micros: u64,
+    push_sync_freq: usize,
 ) -> time::Duration {
     let mut to_write = [0u64; 1234];
     rand::thread_rng().fill(&mut to_write[..]);
@@ -269,7 +279,7 @@ fn runner_server(
     let ac = active.clone();
     let data: &mut Base = unsafe { (Arc::as_ptr(&dc) as *mut Base).as_mut().unwrap() };
     // run the atomic writer
-    let dur = atomic_write_loop(ac, data, &to_write);
+    let dur = atomic_write_loop(ac, data, &to_write, push_sync_freq);
     for h in handles {
         h.join();
     }
@@ -313,12 +323,18 @@ fn bench_no_sync() {
     println!("sink: {:?}", sink);
 }
 
-fn bench_read_server(sleep_dur_micros: u64) {
+fn bench_read_server(sleep_dur_micros: u64, push_sync_freq: usize) {
     let sink = Arc::new(AtomicU64::new(0));
     let read_count = Arc::new(AtomicU64::new(0));
     let mut v = Vec::new();
     for i in 0..ITERS {
-        let d = runner_server(NTHREADS, read_count.clone(), sink.clone(), sleep_dur_micros);
+        let d = runner_server(
+            NTHREADS,
+            read_count.clone(),
+            sink.clone(),
+            sleep_dur_micros,
+            push_sync_freq,
+        );
         v.push(d.as_secs_f64());
     }
     println!("average: {}", mean(v.as_slice()));
@@ -330,7 +346,7 @@ fn bench_read_server(sleep_dur_micros: u64) {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let dur_micros = &args[1].parse::<u64>().unwrap();
+    let push_sync_freq = &args[2].parse::<usize>().unwrap();
 
-    // bench_no_sync();
-    bench_read_server(*dur_micros);
+    bench_read_server(*dur_micros, *push_sync_freq);
 }
