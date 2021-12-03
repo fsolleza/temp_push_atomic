@@ -306,8 +306,7 @@ fn median(v: &[f64]) -> f64 {
 
 const ITERS: usize = 30; // number of iterations of the experiment to run
 const NTHREADS: usize = 36; // number of concurrent reader threads
-                            // const NANOS_INTERVAL: u64 = 500; // interval to update reader server in nanos
-const NPUSHES: usize = 30_000_000; // how many pushes each experiment should run for
+const NPUSHES: usize = 100_000_000; // how many pushes each experiment should run for
 
 fn bench_no_sync() {
     let sink = Arc::new(AtomicU64::new(0));
@@ -348,5 +347,6 @@ fn main() {
     let dur_micros = &args[1].parse::<u64>().unwrap();
     let push_sync_freq = &args[2].parse::<usize>().unwrap();
 
+    // bench_no_sync();
     bench_read_server(*dur_micros, *push_sync_freq);
 }
