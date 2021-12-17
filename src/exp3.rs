@@ -1,15 +1,14 @@
 use rand::Rng;
-use rtrb::*;
-use std::mem;
 use std::sync::{
-    atomic::{AtomicBool, AtomicIsize, AtomicPtr, AtomicU64, AtomicUsize, Ordering::SeqCst},
-    Arc, RwLock,
+    atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering::SeqCst},
+    Arc,
 };
 use std::thread;
 use std::time;
 
 pub struct Base {
     data: [u64; 256],
+    mut_flag: AtomicBool,
     len: usize,
     alen: AtomicUsize,
     aver: AtomicUsize,
@@ -26,6 +25,7 @@ impl Base {
     fn new() -> Self {
         Base {
             data: [0u64; 256],
+            mut_flag: AtomicBool::new(false),
             len: 0,
             alen: AtomicUsize::new(0),
             aver: AtomicUsize::new(0),
@@ -35,8 +35,10 @@ impl Base {
 
     fn atomic_push(&mut self, item: u64) {
         if self.len == 256 {
+            self.mut_flag.store(true, SeqCst);
             self.aver.fetch_add(1, SeqCst);
             self.alen.store(0, SeqCst);
+            self.mut_flag.store(false, SeqCst);
             self.len = 0;
         }
         self.data[self.len] = item;
@@ -56,9 +58,11 @@ impl Base {
     fn read_server(&self) -> Result<Read, &str> {
         for i in 0..3 {
             let v = self.aver.load(SeqCst);
+            while self.mut_flag.load(SeqCst) {}
             let mut data = [0u64; 256];
             let len = self.alen.load(SeqCst);
             data[..len].copy_from_slice(&self.data[..len]);
+            while self.mut_flag.load(SeqCst) {}
             if v == self.aver.load(SeqCst) {
                 let r = Read {
                     data,
@@ -139,29 +143,6 @@ fn read_server_loop(
     sink.fetch_add(sum % 1024, SeqCst);
 }
 
-/// Run a reader that repeatedly calls the read() function which uses no syncrhonization except for
-/// the version number (can't be avoided)
-fn read_loop(
-    active: Arc<AtomicBool>,
-    read_count: Arc<AtomicU64>,
-    sink: Arc<AtomicU64>,
-    data: &Base,
-) {
-    let mut sum = 0;
-    let mut ctr = 0;
-    while active.load(SeqCst) {
-        match data.read() {
-            Ok(read) => {
-                sum += read.data[..read.len].iter().sum::<u64>();
-                ctr += 1;
-            }
-            Err(_) => {}
-        }
-    }
-    read_count.fetch_add(ctr, SeqCst);
-    sink.fetch_add(sum % 1024, SeqCst);
-}
-
 /// A write loop that forces an atomic boolean every time a push happens
 fn atomic_write_loop(active: Arc<AtomicBool>, data: &mut Base, to_write: &[u64]) -> time::Duration {
     let mut counter = 0;
@@ -188,37 +169,6 @@ fn write_loop(active: Arc<AtomicBool>, data: &mut Base, to_write: &[u64]) -> tim
     let elapsed = now.elapsed();
     active.store(false, SeqCst);
     elapsed
-}
-
-/// Runs the benchmark without atomics
-fn runner(readers: usize, read_count: Arc<AtomicU64>, sink: Arc<AtomicU64>) -> time::Duration {
-    let mut to_write = [0u64; 1234];
-    rand::thread_rng().fill(&mut to_write[..]);
-    let data = Arc::new(Base::new());
-    let active = Arc::new(AtomicBool::new(true));
-
-    let mut handles = Vec::new();
-    for _ in 0..readers {
-        let dc = data.clone();
-        let ac = active.clone();
-        let sc = sink.clone();
-        let rc = read_count.clone();
-        handles.push(thread::spawn(move || {
-            let dc = dc;
-            // uses unsynched reader (except for version number)
-            read_loop(ac, rc, sc, &dc);
-        }));
-    }
-
-    let dc = data.clone();
-    let ac = active.clone();
-    let data: &mut Base = unsafe { (Arc::as_ptr(&dc) as *mut Base).as_mut().unwrap() };
-    // uses unsynched writer (except for version number)
-    let dur = write_loop(ac, data, &to_write);
-    for h in handles {
-        h.join();
-    }
-    dur
 }
 
 fn runner_server(
@@ -292,20 +242,6 @@ const NTHREADS: usize = 36; // number of concurrent reader threads
 const MILLIS_INTERVAL: u64 = 10; // interval to update reader server in millis
 const NPUSHES: usize = 10_000_000; // how many pushes each experiment should run for
 
-fn bench_no_sync() {
-    let sink = Arc::new(AtomicU64::new(0));
-    let read_count = Arc::new(AtomicU64::new(0));
-    let mut v = Vec::new();
-    for i in 0..ITERS {
-        let d = runner(NTHREADS, read_count.clone(), sink.clone());
-        v.push(d.as_secs_f64());
-    }
-    println!("average: {}", mean(v.as_slice()));
-    println!("median: {}", median(v.as_slice()));
-    println!("read_count: {:?}", read_count);
-    println!("sink: {:?}", sink);
-}
-
 fn bench_read_server() {
     let sink = Arc::new(AtomicU64::new(0));
     let read_count = Arc::new(AtomicU64::new(0));
@@ -321,6 +257,6 @@ fn bench_read_server() {
 }
 
 fn main() {
-    println!("Running data container without mut flag");
+    println!("Running data container with mut flag");
     bench_read_server();
 }

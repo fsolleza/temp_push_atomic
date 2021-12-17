@@ -17,3 +17,6 @@ path = "src/exp1.rs"
 name = "exp2"
 path = "src/exp2.rs"
 
+[[bin]]
+name = "exp3"
+path = "src/exp3.rs"
