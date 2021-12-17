@@ -10,6 +10,7 @@ use std::time;
 
 pub struct Base {
     data: [u64; 256],
+    mut_flag: AtomicBool,
     len: usize,
     alen: AtomicUsize,
     aver: AtomicUsize,
@@ -26,6 +27,7 @@ impl Base {
     fn new() -> Self {
         Base {
             data: [0u64; 256],
+            mut_flag: AtomicBool::new(false),
             len: 0,
             alen: AtomicUsize::new(0),
             aver: AtomicUsize::new(0),
@@ -35,8 +37,10 @@ impl Base {
 
     fn atomic_push(&mut self, item: u64) {
         if self.len == 256 {
+            self.mut_flag.store(true, SeqCst);
             self.aver.fetch_add(1, SeqCst);
             self.alen.store(0, SeqCst);
+            self.mut_flag.store(false, SeqCst);
             self.len = 0;
         }
         self.data[self.len] = item;
@@ -56,9 +60,11 @@ impl Base {
     fn read_server(&self) -> Result<Read, &str> {
         for i in 0..3 {
             let v = self.aver.load(SeqCst);
+            while self.mut_flag.load(SeqCst) {}
             let mut data = [0u64; 256];
             let len = self.alen.load(SeqCst);
             data[..len].copy_from_slice(&self.data[..len]);
+            while self.mut_flag.load(SeqCst) {}
             if v == self.aver.load(SeqCst) {
                 let r = Read {
                     data,
