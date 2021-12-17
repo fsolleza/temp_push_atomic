@@ -37,9 +37,9 @@ impl Base {
         if self.len == 256 {
             self.mut_flag.store(true, SeqCst);
             self.aver.fetch_add(1, SeqCst);
+            self.len = 0;
             self.alen.store(0, SeqCst);
             self.mut_flag.store(false, SeqCst);
-            self.len = 0;
         }
         self.data[self.len] = item;
         self.len += 1;
